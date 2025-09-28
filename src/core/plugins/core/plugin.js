@@ -224,145 +224,92 @@ class CorePlugin extends Plugin {
    * @param {Object} param0 {group, files}
    * @returns {Promise}
    */
-  action__unpack_move({ group, files }) {
-    return Promise.resolve()
-      .then(() => {
-        this.event.emit("user:write:working", "squares");
-        this.event.emit(
-          "user:write:status",
-          `Moving unpacked ${group} files`,
-          true
-        );
-        this.event.emit("user:write:under", `Moving unpacked files...`);
-        return path.join(this.cachePath, this.props.config.codename, group);
-      })
-      .then(basepath =>
-        Promise.all(
-          files.map(file => {
-            const src = path.join(basepath, file.src);
-            const dst = path.join(basepath, file.dst);
-            return this.moveFiles(src, dst);
-          })
-        )
-      )
-      .then(() => Promise.resolve());
-  }
+action__manual_download({ group, file }) {
+  return Promise.resolve()
+    .then(() => {
+      this.event.emit("user:write:working", "squares");
+      this.event.emit("user:write:status", "Manual download");
+      this.event.emit("user:write:under", `Checking ${group} files...`);
+      return checkFile(
+        {
+          checksum: file.checksum,
+          path: path.join(
+            this.cachePath,
+            this.props.config.codename,
+            group,
+            file.name
+          )
+        },
+        false
+      );
+    })
+    .then(ok => {
+      const _event = this.event;
+      if (!ok) {
+        return new Promise((resolve, reject) => {
+          const attemptDownload = () => {
+            _event.emit("user:manual_download", file, group, (downloadedFilePath) => {
+              if (!downloadedFilePath) {
+                // User cancelled - you could retry or fail gracefully
+                _event.emit("user:write:under", "Download cancelled. Please try again or restart the installer.");
+                reject(new Error(`Manual download cancelled for ${file.name}. Please restart the installer to try again.`));
+                return;
+              }
+              resolve(downloadedFilePath);
+            });
+            _event.emit("user:write:under", "Please select the required file...");
+          };
+          
+          setTimeout(attemptDownload, 10);
+        })
+          .then(downloadedFilePath => {
+            if (!fs.existsSync(downloadedFilePath)) {
+              throw new Error(`Selected file does not exist: ${downloadedFilePath}`);
+            }
 
-  /**
-   * core:manual_download action
-   * @param {Object} param0 {group, file}
-   * @returns {Promise}
-   */
-  action__manual_download({ group, file }) {
-    return Promise.resolve()
-      .then(() => {
-        this.event.emit("user:write:working", "squares");
-        this.event.emit("user:write:status", "Manual download");
-        this.event.emit("user:write:under", `Checking ${group} files...`);
-        return checkFile(
-          {
-            checksum: file.checksum,
-            path: path.join(
-              this.cachePath,
-              this.props.config.codename,
-              group,
-              file.name
-            )
-          },
-          false
-        );
-      })
-      .then(ok => {
-        const _event = this.event;
-        if (!ok) {
-          return new Promise(resolve => {
-            setTimeout(() => {
-              _event.emit("user:manual_download", file, group, path =>
-                resolve(path)
-              );
-              _event.emit("user:write:under", "Manual download required!");
-            }, 10);
-          })
-            .then(downloadedFilePath =>
-              fs
-                .ensureDir(
-                  path.join(this.cachePath, this.props.config.codename, group)
-                )
-                .then(() =>
-                  fs.copyFile(
-                    downloadedFilePath,
-                    path.join(
-                      this.cachePath,
-                      this.props.config.codename,
-                      group,
-                      file.name
-                    )
-                  )
-                )
-            )
-            .then(() =>
-              checkFile(
-                {
-                  checksum: file.checksum,
-                  path: path.join(
+            return fs
+              .ensureDir(
+                path.join(this.cachePath, this.props.config.codename, group)
+              )
+              .then(() =>
+                fs.copyFile(
+                  downloadedFilePath,
+                  path.join(
                     this.cachePath,
                     this.props.config.codename,
                     group,
                     file.name
                   )
-                },
-                true
-              )
+                )
+              );
+          })
+          .then(() =>
+            checkFile(
+              {
+                checksum: file.checksum,
+                path: path.join(
+                  this.cachePath,
+                  this.props.config.codename,
+                  group,
+                  file.name
+                )
+              },
+              true
             )
-            .then(ok => {
-              window.send("user:manual_download:check", ok);
-              if (ok) {
-                return ok;
-              } else {
-                throw new Error("checksum mismatch");
-              }
-            });
-        }
-      });
-  }
-
-  moveFiles(sourceDir, targetDir) {
-    return new Promise((resolve, reject) => {
-      fs.readdir(sourceDir, (err, files) => {
-        if (err) {
-          reject(err);
-          return;
-        }
-
-        files.forEach(file => {
-          const oldPath = path.join(sourceDir, file);
-          const newPath = path.join(targetDir, file);
-          const stat = fs.lstatSync(oldPath);
-
-          if (stat.isDirectory()) {
-            moveFiles(oldPath, targetDir)
-              .then(() => {
-                if (files.indexOf(file) === files.length - 1) {
-                  resolve();
-                }
-              })
-              .catch(err => reject(err));
-          } else if (stat.isFile()) {
-            fs.rename(oldPath, newPath, err => {
-              if (err) {
-                reject(err);
-                return;
-              }
-
-              if (files.indexOf(file) === files.length - 1) {
-                resolve();
-              }
-            });
-          }
-        });
-      });
+          )
+          .then(ok => {
+            window.send("user:manual_download:check", ok);
+            if (ok) {
+              return ok;
+            } else {
+              throw new Error("checksum mismatch");
+            }
+          });
+      }
     });
-  }
 }
+}
+
+
 
 module.exports = CorePlugin;
